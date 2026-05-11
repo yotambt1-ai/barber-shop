@@ -1,0 +1,38 @@
+{
+  "name": "Appointment",
+  "type": "object",
+  "properties": {
+    "barber": {
+      "type": "string",
+      "enum": [
+        "Matan",
+        "Liav"
+      ],
+      "description": "Selected barber"
+    },
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "Appointment date"
+    },
+    "time": {
+      "type": "string",
+      "description": "Appointment time slot"
+    },
+    "customer_name": {
+      "type": "string",
+      "description": "Customer full name"
+    },
+    "phone": {
+      "type": "string",
+      "description": "Customer phone number"
+    }
+  },
+  "required": [
+    "barber",
+    "date",
+    "time",
+    "customer_name",
+    "phone"
+  ]
+}
