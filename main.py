@@ -5,6 +5,7 @@ from typing import List, Optional
 import boto3
 import uuid
 from botocore.exceptions import ClientError
+from boto3.dynamodb.conditions import Attr
 import uvicorn
 
 # --- AWS Setup (DynamoDB + SNS) ---
@@ -90,6 +91,17 @@ async def read_appointments(skip: int = 0, limit: int = 100):
             app["id"] = app.get("appointment_id")
             app["customer_name"] = app.get("name", app.get("customer_name", ""))
         return items
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=f"AWS Error: {e.response['Error']['Message']}")
+
+@app.get("/appointments/booked", response_model=List[str])
+async def get_booked_times(date: str, barber: str):
+    try:
+        response = table.scan(
+            FilterExpression=Attr('date').eq(date) & Attr('barber').eq(barber)
+        )
+        items = response.get('Items', [])
+        return [item.get('time') for item in items if 'time' in item]
     except ClientError as e:
         raise HTTPException(status_code=500, detail=f"AWS Error: {e.response['Error']['Message']}")
 

@@ -18,6 +18,14 @@ export const apiClient = {
       
       return response.json();
     },
+    getBookedTimes: async (date, barber) => {
+      const response = await fetch(`${API_BASE_URL}/appointments/booked?date=${encodeURIComponent(date)}&barber=${encodeURIComponent(barber)}`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to fetch booked times');
+      }
+      return response.json();
+    },
     list: async (skip = 0, limit = 100) => {
       const response = await fetch(`${API_BASE_URL}/appointments/?skip=${skip}&limit=${limit}`);
       if (!response.ok) {

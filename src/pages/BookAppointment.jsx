@@ -22,6 +22,7 @@ export default function BookAppointment() {
   const [time, setTime] = useState(null);
   const [customerName, setCustomerName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [bookedTimes, setBookedTimes] = useState([]);
 
   const currentStepIndex = STEPS.indexOf(step);
 
@@ -30,9 +31,16 @@ export default function BookAppointment() {
     setStep("date");
   };
 
-  const handleDateSelect = (d) => {
+  const handleDateSelect = async (d) => {
     setDate(d);
     setStep("time");
+    try {
+      const times = await apiClient.appointments.getBookedTimes(d, barber);
+      setBookedTimes(times);
+    } catch (error) {
+      console.error("Failed to fetch booked times:", error);
+      setBookedTimes([]);
+    }
   };
 
   const handleTimeSelect = (t) => {
@@ -157,6 +165,7 @@ export default function BookAppointment() {
               <TimeSelection
                 selectedTime={time}
                 onSelect={handleTimeSelect}
+                bookedTimes={bookedTimes}
               />
             </motion.div>
           )}
