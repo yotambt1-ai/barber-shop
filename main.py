@@ -2,17 +2,15 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
-from pydantic import BaseModel, ConfigDict  # הוספתי את BaseModel לכאן
+from pydantic import BaseModel, ConfigDict
 from typing import List
 import uvicorn
 
-# --- Database Setup (MongoDB + Motor) ---
 MONGO_URL = "mongodb://localhost:27017"
 client = AsyncIOMotorClient(MONGO_URL)
 db = client.barber_db
 appointments_collection = db.appointments
 
-# --- Pydantic Schemas ---
 class AppointmentBase(BaseModel):
     barber: str
     date: str
@@ -25,23 +23,18 @@ class AppointmentCreate(AppointmentBase):
 
 class AppointmentResponse(AppointmentBase):
     id: str
-    
-    # זה התיקון לאזהרה שהייתה לך קודם
     model_config = ConfigDict(from_attributes=True)
 
-# --- FastAPI Application Setup ---
 app = FastAPI(title="Barber Appointments API")
 
-# Configure CORS to allow your React app to communicate with this backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, restrict this to your frontend URL (e.g., ["http://localhost:5173"])
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- CRUD Endpoints ---
 @app.post("/appointments/", response_model=AppointmentResponse)
 async def create_appointment(appointment: AppointmentCreate):
     existing = await appointments_collection.find_one({
@@ -100,4 +93,4 @@ async def delete_appointment(appointment_id: str):
     return {"ok": True}
 
 if __name__ == '__main__':
-    uvicorn.run('main:app', host='127.0.0.1', port=8000, reload=True)
+    uvicorn.run('main:app', host='0.0.0.0', port=8000, reload=True)
