@@ -1,15 +1,16 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-from bson import ObjectId
 from pydantic import BaseModel, ConfigDict
-from typing import List
+from typing import List, Optional
+import boto3
+import uuid
+from botocore.exceptions import ClientError
 import uvicorn
 
-MONGO_URL = "mongodb://localhost:27017"
-client = AsyncIOMotorClient(MONGO_URL)
-db = client.barber_db
-appointments_collection = db.appointments
+# --- AWS Setup (DynamoDB + SNS) ---
+dynamodb = boto3.resource('dynamodb', region_name='eu-north-1')
+sns = boto3.client('sns', region_name='eu-north-1')
+table = dynamodb.Table('BarberAppointments')
 
 class AppointmentBase(BaseModel):
     barber: str
@@ -17,12 +18,14 @@ class AppointmentBase(BaseModel):
     time: str
     customer_name: str
     phone: str
+    email: Optional[str] = None
 
 class AppointmentCreate(AppointmentBase):
     pass
 
 class AppointmentResponse(AppointmentBase):
     id: str
+    status: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 app = FastAPI(title="Barber Appointments API")
@@ -42,60 +45,105 @@ async def root():
 
 @app.post("/appointments/", response_model=AppointmentResponse)
 async def create_appointment(appointment: AppointmentCreate):
-    existing = await appointments_collection.find_one({
+    appointment_id = str(uuid.uuid4())
+    
+    item = {
+        "appointment_id": appointment_id,
+        "name": appointment.customer_name,
+        "time": appointment.time,
+        "email": appointment.email or "no-email@provided.com",
+        "status": "pending",
         "barber": appointment.barber,
         "date": appointment.date,
-        "time": appointment.time
-    })
-    if existing:
-        raise HTTPException(status_code=400, detail="The selected time slot is already booked.")
+        "phone": appointment.phone
+    }
+    
+    try:
+        # Save to DynamoDB
+        table.put_item(Item=item)
         
-    app_dict = appointment.model_dump()
-    result = await appointments_collection.insert_one(app_dict)
-    created_appointment = await appointments_collection.find_one({"_id": result.inserted_id})
-    created_appointment["id"] = str(created_appointment["_id"])
-    return created_appointment
+        # Trigger SNS (Dynamically fetch ARN by getting the topic via name)
+        topic_response = sns.create_topic(Name='BarberAppointmentTopic')
+        topic_arn = topic_response['TopicArn']
+        
+        sns.publish(
+            TopicArn=topic_arn,
+            Message=f"New appointment booked!\nID: {appointment_id}\nName: {item['name']}\nTime: {item['time']}\nBarber: {item['barber']}",
+            Subject="New Barber Appointment"
+        )
+        
+        # Format matching payload for the frontend
+        response_data = appointment.model_dump()
+        response_data["id"] = appointment_id
+        response_data["status"] = "pending"
+        return response_data
+        
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=f"AWS Error: {e.response['Error']['Message']}")
 
 @app.get("/appointments/", response_model=List[AppointmentResponse])
 async def read_appointments(skip: int = 0, limit: int = 100):
-    appointments = await appointments_collection.find().skip(skip).limit(limit).to_list(limit)
-    for app in appointments:
-        app["id"] = str(app["_id"])
-    return appointments
+    try:
+        response = table.scan(Limit=limit)
+        items = response.get('Items', [])
+        for app in items:
+            app["id"] = app.get("appointment_id")
+            app["customer_name"] = app.get("name", app.get("customer_name", ""))
+        return items
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=f"AWS Error: {e.response['Error']['Message']}")
 
 @app.get("/admin/appointments/", response_model=List[AppointmentResponse])
 async def admin_read_appointments():
-    appointments = await appointments_collection.find().sort([("date", 1), ("time", 1)]).to_list(1000)
-    for app in appointments:
-        app["id"] = str(app["_id"])
-    return appointments
+    try:
+        response = table.scan()
+        items = response.get('Items', [])
+        # Sort in Python since DynamoDB scans do not natively sort
+        items.sort(key=lambda x: (x.get("date", ""), x.get("time", "")))
+        for app in items:
+            app["id"] = app.get("appointment_id")
+            app["customer_name"] = app.get("name", app.get("customer_name", ""))
+        return items
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=f"AWS Error: {e.response['Error']['Message']}")
 
 @app.put("/appointments/{appointment_id}", response_model=AppointmentResponse)
 async def update_appointment(appointment_id: str, appointment: AppointmentCreate):
     try:
-        obj_id = ObjectId(appointment_id)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid ID format")
+        response = table.get_item(Key={"appointment_id": appointment_id})
+        if "Item" not in response:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+            
+        item = {
+            "appointment_id": appointment_id,
+            "name": appointment.customer_name,
+            "time": appointment.time,
+            "email": appointment.email or "no-email@provided.com",
+            "status": response["Item"].get("status", "pending"),
+            "barber": appointment.barber,
+            "date": appointment.date,
+            "phone": appointment.phone
+        }
+        table.put_item(Item=item)
         
-    result = await appointments_collection.update_one({"_id": obj_id}, {"$set": appointment.model_dump()})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Appointment not found")
-        
-    updated_app = await appointments_collection.find_one({"_id": obj_id})
-    updated_app["id"] = str(updated_app["_id"])
-    return updated_app
+        response_data = appointment.model_dump()
+        response_data["id"] = appointment_id
+        response_data["status"] = item["status"]
+        return response_data
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=f"AWS Error: {e.response['Error']['Message']}")
 
 @app.delete("/appointments/{appointment_id}")
 async def delete_appointment(appointment_id: str):
     try:
-        obj_id = ObjectId(appointment_id)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid ID format")
-        
-    result = await appointments_collection.delete_one({"_id": obj_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Appointment not found")
-    return {"ok": True}
+        response = table.get_item(Key={"appointment_id": appointment_id})
+        if "Item" not in response:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+            
+        table.delete_item(Key={"appointment_id": appointment_id})
+        return {"ok": True}
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=f"AWS Error: {e.response['Error']['Message']}")
 
 if __name__ == '__main__':
     uvicorn.run('main:app', host='0.0.0.0', port=8000, reload=True)
