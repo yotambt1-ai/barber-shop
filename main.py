@@ -10,7 +10,7 @@ import uvicorn
 # --- AWS Setup (DynamoDB + SNS) ---
 dynamodb = boto3.resource('dynamodb', region_name='eu-north-1')
 sns = boto3.client('sns', region_name='eu-north-1')
-table = dynamodb.Table('BarberAppointments')
+table = dynamodb.Table('barber-appointment')
 
 class AppointmentBase(BaseModel):
     barber: str
@@ -63,7 +63,7 @@ async def create_appointment(appointment: AppointmentCreate):
         table.put_item(Item=item)
         
         # Trigger SNS (Dynamically fetch ARN by getting the topic via name)
-        topic_response = sns.create_topic(Name='BarberAppointmentTopic')
+        topic_response = sns.create_topic(Name='barber-appointment-topic')
         topic_arn = topic_response['TopicArn']
         
         sns.publish(
