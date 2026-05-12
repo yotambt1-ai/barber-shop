@@ -35,6 +35,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# === הוספנו את הנתיב הזה בשביל ה-Load Balancer ===
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "Barber API is up and running!"}
+
 @app.post("/appointments/", response_model=AppointmentResponse)
 async def create_appointment(appointment: AppointmentCreate):
     existing = await appointments_collection.find_one({

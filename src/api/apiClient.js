@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'http://barber-shop-907161570.eu-north-1.elb.amazonaws.com';
 
 export const apiClient = {
   appointments: {
